@@ -3,6 +3,11 @@ import datetime
 from airflow import DAG
 from airflow.providers.postgres.operators.postgres import PostgresOperator
 
+# test import these libs to see if they cause errors in airflow
+import requests
+import feedparser
+import psycopg2
+
 
 with DAG(
     dag_id="postgres_operator_example",
