@@ -1,6 +1,3 @@
 --constraint "https://raw.githubusercontent.com/apache/airflow/constraints-2.2.2/constraints-3.7.txt"
 feedparser==6.0.10
 snscrape
-snscrape#==0.4.3.20220106
-# psycopg==3.0.15
-# psycopg-binary==3.0.15
