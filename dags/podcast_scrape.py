@@ -16,15 +16,15 @@ default_args = {
 
 
 def get_activated_sources():
-    request = """
+    query = """
         SELECT id, feed_url, bucket_directory
         FROM podcasts
         WHERE bucket_sync = True
     """
-    pg_hook = PostgresHook(postgres_conn_id="aurora_podcastdb")
-    connection = pg_hook.get_conn()
-    cursor = connection.cursor()
-    cursor.execute(request)
+    hook = PostgresHook(postgres_conn_id="aurora_podcastdb")
+    conn = hook.get_conn()
+    cursor = conn.cursor()
+    cursor.execute(query)
     sources = cursor.fetchall()
     for source in sources:
         print(f"Source: {source[0]} - activated: {source[1]}")
