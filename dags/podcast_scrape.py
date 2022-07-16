@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta
 
 from airflow import DAG
-from airflow.hooks.postgres_hook import PostgresHook
+from airflow.providers.postgres.hooks.postgres import PostgresHook
 from airflow.operators.dummy_operator import DummyOperator
 from airflow.operators.python_operator import PythonOperator
 
@@ -26,8 +26,7 @@ def get_activated_sources():
     cursor = conn.cursor()
     cursor.execute(query)
     sources = cursor.fetchall()
-    for source in sources:
-        print(f"Source: {source[0]} - activated: {source[1]}")
+    print(f"Found {len(sources)} podcasts to update: {sources}")
     return sources
 
 
@@ -45,3 +44,6 @@ with DAG(
     )
 
     start_task >> hook_task
+
+
+# {"cursor": "dictcursor"}
