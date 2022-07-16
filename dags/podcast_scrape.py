@@ -26,8 +26,7 @@ def get_podcast_list():
     with postgres.cursor(name="serverCursor", cursor_factory=RealDictCursor) as cur:
         cur.execute(query)
         query_result = cur.fetchall()
-        podcast_list = [{k:v for k, v in row.items()} for row in query_result]
-        podcast_list = [dict(row) for row in data]  # same as above but may not serializable...
+        podcast_list = [dict(row) for row in query_result]
         print(f"Found {len(podcast_list)} podcasts to update: {podcast_list}")
     postgres.close()
     return podcast_list
