@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta
+from psycopg2.extras import RealDictCursor
 
 from airflow import DAG
 from airflow.providers.postgres.hooks.postgres import PostgresHook
@@ -11,23 +12,24 @@ default_args = {
     "depend_on_past": False,
     "start_date": datetime(2020, 1, 1),
     "retries": 1,
-    "retry_delay": timedelta(seconds=20),
+    "retry_delay": timedelta(seconds=30),
 }
 
 
-def get_activated_sources():
+def get_podcast_list():
     query = """
         SELECT id, feed_url, bucket_directory
         FROM podcasts
         WHERE bucket_sync = True
     """
-    hook = PostgresHook(postgres_conn_id="aws_podcastdb")
-    conn = hook.get_conn()
-    cursor = conn.cursor()
-    cursor.execute(query)
-    sources = cursor.fetchall()
-    print(f"Found {len(sources)} podcasts to update: {sources}")
-    return sources
+    postgres = PostgresHook(postgres_conn_id="aws_podcastdb").get_conn()
+    with postgres.cursor(name="serverCursor", cursor_factory=RealDictCursor) as cur:
+        cur.execute(query)
+        query_result = cur.fetchall()
+        podcast_list = [dict(row) for row in query_result]
+        print(f"Found {len(podcast_list)} podcasts to update: {podcast_list}")
+    postgres.close()
+    return podcast_list
 
 
 with DAG(
@@ -37,13 +39,12 @@ with DAG(
     catchup=False
 ) as dag:
 
-    start_task = DummyOperator(task_id="start_task")
+    start_task = DummyOperator(
+        task_id="start_task"
+    )
     hook_task = PythonOperator(
         task_id="hook_task",
-        python_callable=get_activated_sources
+        python_callable=get_podcast_list
     )
 
     start_task >> hook_task
-
-
-# {"cursor": "dictcursor"}
