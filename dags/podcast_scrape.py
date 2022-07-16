@@ -21,9 +21,7 @@ def get_activated_sources():
         FROM podcasts
         WHERE bucket_sync = True
     """
-    pg_hook = PostgresHook(
-        postgres_conn_id="aurora_podcastdb", schema="podcastdb"
-    )
+    pg_hook = PostgresHook(postgres_conn_id="aurora_podcastdb")
     connection = pg_hook.get_conn()
     cursor = connection.cursor()
     cursor.execute(request)
