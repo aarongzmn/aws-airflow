@@ -1,25 +1,18 @@
-import time
-import json
-import re
-import io
-import csv
-
-from datetime import datetime, timedelta, timezone
-from dateutil import parser
-
+from airflow import DAG
+from airflow.providers.amazon.aws.hooks.s3 import S3Hook
+from airflow.providers.postgres.hooks.postgres import PostgresHook
+from airflow.operators.python_operator import PythonOperator
 import feedparser
 import psycopg2
 from psycopg2.extras import RealDictCursor, execute_values
+from dateutil import parser
+from datetime import datetime, timedelta, timezone
+import json
+import re
+import time
+
+
 psycopg2.extensions.register_adapter(dict, psycopg2.extras.Json)
-
-from airflow import DAG
-
-# https://airflow.apache.org/docs/apache-airflow-providers-amazon/stable/_api/airflow/providers/amazon/aws/hooks/s3/index.html
-from airflow.providers.amazon.aws.hooks.s3 import S3Hook
-from airflow.providers.postgres.hooks.postgres import PostgresHook
-
-from airflow.operators.dummy_operator import DummyOperator
-from airflow.operators.python_operator import PythonOperator
 
 
 default_args = {
@@ -234,7 +227,7 @@ def get_new_episodes_and_save_to_s3(**context):
 
 def batch_insert_into_database(table_name: str, episodes: list) -> list:
     col_names = ", ".join(episodes[0].keys())
-    insert_values = [ tuple(e.values()) for e in episodes ]
+    insert_values = [tuple(e.values()) for e in episodes]
     conn = PostgresHook(postgres_conn_id="aws_podcastdb").get_conn()
     with conn.cursor() as curs:
         sql = f"INSERT INTO {table_name} ({col_names}) VALUES %s RETURNING id"
@@ -253,9 +246,7 @@ def add_new_episodes_to_db(**context):
         print(episode_list[0].keys())
         table_name = "episodes"
         insert_result = batch_insert_into_database(table_name, episode_list)
-        print(len(insert_result))
-        fail_count = [ i for i in insert_result if i[0] != 1]
-        print(len(fail_count))
+        print(insert_result)
 
 
 def download_episodes_to_s3():
@@ -284,7 +275,6 @@ with DAG(
         python_callable=add_new_episodes_to_db,
         provide_context=True
     )
-    # should 'get_episode_list' add new episdoes to db? Or should that be separate task?
     download_episodes_to_s3 = PythonOperator(
         task_id="download_episodes_to_s3",
         python_callable=download_episodes_to_s3,
