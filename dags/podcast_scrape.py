@@ -232,6 +232,16 @@ def get_new_episodes_and_save_to_s3(**context):
     context["ti"].xcom_push(key="podcast_feed_updates", value=podcast_list)
 
 
+def batch_insert_into_database(table_name: str, episodes: list) -> list:
+    col_names = ", ".join(episodes[0].keys())
+    insert_values = [ tuple(e.values()) for e in episodes ]
+    conn = PostgresHook(postgres_conn_id="aws_podcastdb").get_conn()
+    with conn.cursor() as curs:
+        sql = f"INSERT INTO {table_name} ({col_names}) VALUES %s RETURNING id"
+        insert_result = psycopg2.extras.execute_values(curs, sql, insert_values, page_size=1000, fetch=True)
+    return insert_result
+
+
 def add_new_episodes_to_db(**context):
     podcast_list = context["ti"].xcom_pull(task_ids="get_new_episodes_and_save_to_s3", key="podcast_feed_updates")
     for podcast in range(len(podcast_list)):
@@ -239,8 +249,13 @@ def add_new_episodes_to_db(**context):
         bucket_name = podcast_list[podcast]["bucket_name"]
         s3_hook = S3Hook(aws_conn_id='aws_default')
         response = s3_hook.read_key(key_directory, bucket_name)
-        podcast_list = json.loads(response)
-        print(podcast_list[0]["website_url"])
+        episode_list = json.loads(response)
+        print(episode_list[0].keys())
+        table_name = "episodes"
+        insert_result = batch_insert_into_database(table_name, episode_list)
+        print(len(insert_result))
+        fail_count = [ i for i in insert_result if i[0] != 1]
+        print(len(fail_count))
 
 
 def download_episodes_to_s3():
