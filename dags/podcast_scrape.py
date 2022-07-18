@@ -3,6 +3,7 @@ from airflow.providers.amazon.aws.hooks.s3 import S3Hook
 from airflow.providers.postgres.hooks.postgres import PostgresHook
 from airflow.operators.python_operator import PythonOperator
 import feedparser
+import requests
 import psycopg2
 from psycopg2.extras import RealDictCursor, execute_values
 from dateutil import parser
@@ -57,15 +58,17 @@ def get_podcast_list_from_db(**context) -> [list]:
                     podcast_list[podcast]["last_updated"] = published_date
                 else:
                     podcast_list[podcast]["last_updated"] = None
+    print(f"Found {len(podcast_list)} podcasts to update.")
     context["ti"].xcom_push(key="podcast_list", value=podcast_list)
 
 
 def get_feed_data_for_new_episodes(podcast_data):
-    last_updated = parser.parse(podcast_data["last_updated"])
     feed_url = podcast_data["feed_url"]
+    last_updated = podcast_data["last_updated"]
     if last_updated is None:
         last_updated = datetime(year=2000, month=1, day=1).replace(tzinfo=timezone.utc)
     else:
+        last_updated = parser.parse(podcast_data["last_updated"])
         print(f"Using cutoff date: {last_updated}")
     page = 0  # set to 1+ to emulate existing table data
     if page != 0:
@@ -212,6 +215,7 @@ def get_new_episodes_and_save_to_s3(**context):
 
         podcast_id = podcast_list[podcast]["id"]
         key_episode_data = get_key_attributes_from_feed_data(podcast_feed_data, podcast_id, get_cast=True)
+        print(f"Found {len(key_episode_data)} episodes to add to database.")
         string_data = json.dumps(key_episode_data)
         key_directory = f"{metadata_directory}/processed/{key_name}"
         podcast_list[podcast]["processed_directory"] = key_directory
@@ -228,11 +232,12 @@ def get_new_episodes_and_save_to_s3(**context):
 def batch_insert_into_database(table_name: str, episodes: list) -> list:
     col_names = ", ".join(episodes[0].keys())
     insert_values = [tuple(e.values()) for e in episodes]
-    conn = PostgresHook(postgres_conn_id="aws_podcastdb").get_conn()
-    with conn.cursor() as curs:
-        sql = f"INSERT INTO {table_name} ({col_names}) VALUES %s RETURNING id"
-        insert_result = psycopg2.extras.execute_values(curs, sql, insert_values, page_size=1000, fetch=True)
-    return insert_result
+    with PostgresHook(postgres_conn_id="aws_podcastdb").get_conn() as conn:
+        with conn.cursor() as curs:
+            sql = f"INSERT INTO {table_name} ({col_names}) VALUES %s RETURNING id"
+            insert_result = psycopg2.extras.execute_values(curs, sql, insert_values, page_size=1000, fetch=True)
+            print(f"Added {len(insert_result)} podcast episodes to database.")
+    return
 
 
 def add_new_episodes_to_db(**context):
@@ -243,21 +248,69 @@ def add_new_episodes_to_db(**context):
         s3_hook = S3Hook(aws_conn_id='aws_default')
         response = s3_hook.read_key(key_directory, bucket_name)
         episode_list = json.loads(response)
-        print(episode_list[0].keys())
         table_name = "episodes"
-        insert_result = batch_insert_into_database(table_name, episode_list)
-        print(insert_result)
+        batch_insert_into_database(table_name, episode_list)
 
 
 def download_episodes_to_s3():
-    time.sleep(1)
-    return
+    s3_hook = S3Hook(aws_conn_id='aws_default')
+    with PostgresHook(postgres_conn_id="aws_podcastdb").get_conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as curs:
+            curs.execute(
+                """
+                SELECT *
+                FROM podcasts
+                WHERE bucket_sync = True
+                """
+            )
+            query_result = curs.fetchall()
+            podcast_list = [dict(row) for row in query_result]
+            for podcast in podcast_list:
+                podcast_id = podcast["id"]
+                curs.execute(
+                    f"""
+                    SELECT id, file_source, published_date
+                    FROM episodes
+                    WHERE podcast_id = {podcast_id}
+                        AND file_source IS NOT NULL
+                        AND file_save_location IS NULL
+                    ORDER BY published_date ASC
+                    LIMIT 50
+                    """
+                )
+                query_result = curs.fetchall()
+                episode_list = [dict(row) for row in query_result]
+
+                audio_directory = podcast["audio_directory"]
+                bucket_name = podcast["bucket_name"]
+                for episode in episode_list:
+                    audio_file = requests.get(episode["file_source"]).content
+                    published_date = episode["published_date"].strftime('%Y-%m-%dT%H-%M-%S')
+                    orig_name = episode["file_source"].split("/")[-1]
+                    key_directory = f"{audio_directory}/{published_date} - {orig_name}"
+                    s3_hook.load_bytes(
+                        audio_file,
+                        key=key_directory,
+                        bucket_name=bucket_name,
+                        replace=True
+                    )
+                    
+                    curs.execute(
+                        f"""
+                        UPDATE episodes
+                        SET file_save_location = '{key_directory}'
+                        WHERE id = {episode["id"]}
+                        """
+                    )
+                    curs.commit()
+                    print(key_directory)
+                    time.sleep(15)
 
 
 with DAG(
     dag_id="podcast_scrape",
     default_args=default_args,
-    schedule_interval="@daily",
+    schedule_interval="@hourly",
     catchup=False
 ) as dag:
     get_podcast_list_from_db = PythonOperator(
@@ -277,7 +330,7 @@ with DAG(
     )
     download_episodes_to_s3 = PythonOperator(
         task_id="download_episodes_to_s3",
-        python_callable=download_episodes_to_s3,
+        python_callable=download_episodes_to_s3
     )
 
     get_podcast_list_from_db >> get_new_episodes_and_save_to_s3 >> add_new_episodes_to_db >> download_episodes_to_s3
