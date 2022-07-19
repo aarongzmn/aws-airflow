@@ -235,13 +235,12 @@ def scrape_tweets_for_query(**context):
                     print(f"Added {len(insert_result)} new tweets for query: {query_string}")
                     insert_result = batch_insert_into_database("users", users_table_updates)
                     print(f"Added {len(insert_result)} new users for query: {query_string}")
-
         return
 
 with DAG(
     dag_id="twitter_scrape",
     default_args=default_args,
-    schedule_interval="@hourly",
+    schedule_interval="@daily",
     catchup=False,
 ) as dag:
     get_query_tasks_from_database = PythonOperator(
