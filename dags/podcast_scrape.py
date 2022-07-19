@@ -5,6 +5,7 @@ from airflow.operators.python_operator import PythonOperator
 import feedparser
 import requests
 import psycopg2
+import logging
 from psycopg2.extras import RealDictCursor, execute_values
 from dateutil import parser
 from datetime import datetime, timedelta, timezone
@@ -17,14 +18,14 @@ psycopg2.extensions.register_adapter(dict, psycopg2.extras.Json)
 
 
 default_args = {
-    "owner": "airflow",
+    "owner": "Aaron Guzman",
     "depend_on_past": False,
     "start_date": datetime(2020, 1, 1),
     "retries": 1,
     "retry_delay": timedelta(seconds=30),
 }
 
-
+# TASK 1
 def get_podcast_list_from_db(**context) -> [list]:
     """Check database to get a list of podcasts that need to be checked for updates.
     Also get the last 'published_date' for each podcast.
@@ -58,10 +59,10 @@ def get_podcast_list_from_db(**context) -> [list]:
                     podcast_list[podcast]["last_updated"] = published_date
                 else:
                     podcast_list[podcast]["last_updated"] = None
-    print(f"Found {len(podcast_list)} podcasts to update.")
+    logging.info(f"Found {len(podcast_list)} podcasts to update.")
     context["ti"].xcom_push(key="podcast_list", value=podcast_list)
 
-
+# TASK 2 Helper Function
 def get_feed_data_for_new_episodes(podcast_data):
     feed_url = podcast_data["feed_url"]
     last_updated = podcast_data["last_updated"]
@@ -69,10 +70,10 @@ def get_feed_data_for_new_episodes(podcast_data):
         last_updated = datetime(year=2000, month=1, day=1).replace(tzinfo=timezone.utc)
     else:
         last_updated = parser.parse(podcast_data["last_updated"])
-        print(f"Using cutoff date: {last_updated}")
+        logging.info(f"Using cutoff date: {last_updated}")
     page = 0  # set to 1+ to emulate existing table data
     if page != 0:
-        print(f"Starting scrape at page {page}")
+        logging.info(f"Starting scrape at page {page}")
     next_page = True
     cutoff_reached = False
     podcast_feed_data = []
@@ -95,7 +96,7 @@ def get_feed_data_for_new_episodes(podcast_data):
             time.sleep(2)  # avoid overloading server
     return podcast_feed_data
 
-
+# TASK 2 Helper Function
 def regex_expisode_cast(pattern: str, string: str) -> list:
     """Use regular expression to search for pattern in text.
     Args:
@@ -115,7 +116,7 @@ def regex_expisode_cast(pattern: str, string: str) -> list:
         return None
     return cast_list
 
-
+# TASK 2 Helper Function
 def get_key_attributes_from_feed_data(podcast_feed_data, podcast_id, get_cast=True) -> [dict]:
     """
     Args:
@@ -192,7 +193,7 @@ def get_key_attributes_from_feed_data(podcast_feed_data, podcast_id, get_cast=Tr
         key_episode_data.append(episode_data)
     return key_episode_data
 
-
+# TASK 2
 def get_new_episodes_and_save_to_s3(**context):
     podcast_list = context["ti"].xcom_pull(task_ids="get_podcast_list_from_db", key="podcast_list")
 
@@ -215,7 +216,7 @@ def get_new_episodes_and_save_to_s3(**context):
 
         podcast_id = podcast_list[podcast]["id"]
         key_episode_data = get_key_attributes_from_feed_data(podcast_feed_data, podcast_id, get_cast=True)
-        print(f"Found {len(key_episode_data)} episodes to add to database.")
+        logging.info(f"Found {len(key_episode_data)} episodes to add to database.")
         string_data = json.dumps(key_episode_data)
         key_directory = f"{metadata_directory}/processed/{key_name}"
         podcast_list[podcast]["processed_directory"] = key_directory
@@ -236,10 +237,10 @@ def batch_insert_into_database(table_name: str, episodes: list) -> list:
         with conn.cursor() as curs:
             sql = f"INSERT INTO {table_name} ({col_names}) VALUES %s RETURNING id"
             insert_result = psycopg2.extras.execute_values(curs, sql, insert_values, page_size=1000, fetch=True)
-            print(f"Added {len(insert_result)} podcast episodes to database.")
+            logging.info(f"Added {len(insert_result)} podcast episodes to database.")
     return
 
-
+# TASK 3
 def add_new_episodes_to_db(**context):
     podcast_list = context["ti"].xcom_pull(task_ids="get_new_episodes_and_save_to_s3", key="podcast_feed_updates")
     for podcast in range(len(podcast_list)):
@@ -248,89 +249,87 @@ def add_new_episodes_to_db(**context):
         s3_hook = S3Hook(aws_conn_id='aws_default')
         response = s3_hook.read_key(key_directory, bucket_name)
         episode_list = json.loads(response)
-        table_name = "episodes"
-        batch_insert_into_database(table_name, episode_list)
+        if len(episode_list) > 0:
+            table_name = "episodes"
+            batch_insert_into_database(table_name, episode_list)
 
-
+# TASK 4
 def download_episodes_to_s3():
     s3_hook = S3Hook(aws_conn_id='aws_default')
     with PostgresHook(postgres_conn_id="aws_podcastdb").get_conn() as conn:
         with conn.cursor(cursor_factory=RealDictCursor) as curs:
             curs.execute(
                 """
-                SELECT *
-                FROM podcasts
-                WHERE bucket_sync = True
+                SELECT episodes.id, episodes.file_source, episodes.published_date, podcasts.bucket_name, podcasts.audio_directory
+                FROM episodes
+                LEFT JOIN podcasts 
+                ON episodes.podcast_id = podcasts.id
+                WHERE episodes.file_source IS NOT NULL
+                    AND episodes.file_save_location IS NULL
+                LIMIT 100
                 """
             )
             query_result = curs.fetchall()
-            podcast_list = [dict(row) for row in query_result]
-            for podcast in podcast_list:
-                podcast_id = podcast["id"]
+            episode_list = [dict(row) for row in query_result]
+    for episode in episode_list:
+        episode_id = episode["id"]
+        audio_directory = episode["audio_directory"]
+        bucket_name = episode["bucket_name"]
+        audio_file = requests.get(episode["file_source"]).content
+        published_date = episode["published_date"].strftime('%Y-%m-%dT%H-%M-%S')
+        orig_name = episode["file_source"].split("/")[-1]
+        key_directory = f"{audio_directory}/{published_date} - {orig_name}"
+        s3_hook.load_bytes(
+            audio_file,
+            key=key_directory,
+            bucket_name=bucket_name,
+            replace=True
+        )
+        logging.info(key_directory)
+        with PostgresHook(postgres_conn_id="aws_podcastdb").get_conn() as conn:
+            with conn.cursor() as curs:
                 curs.execute(
                     f"""
-                    SELECT id, file_source, published_date
-                    FROM episodes
-                    WHERE podcast_id = {podcast_id}
-                        AND file_source IS NOT NULL
-                        AND file_save_location IS NULL
-                    ORDER BY published_date ASC
-                    LIMIT 50
+                    UPDATE episodes
+                    SET file_save_location = '{key_directory}'
+                    WHERE id = {episode_id}
                     """
                 )
-                query_result = curs.fetchall()
-                episode_list = [dict(row) for row in query_result]
-
-                audio_directory = podcast["audio_directory"]
-                bucket_name = podcast["bucket_name"]
-                for episode in episode_list:
-                    audio_file = requests.get(episode["file_source"]).content
-                    published_date = episode["published_date"].strftime('%Y-%m-%dT%H-%M-%S')
-                    orig_name = episode["file_source"].split("/")[-1]
-                    key_directory = f"{audio_directory}/{published_date} - {orig_name}"
-                    s3_hook.load_bytes(
-                        audio_file,
-                        key=key_directory,
-                        bucket_name=bucket_name,
-                        replace=True
-                    )
-                    
-                    curs.execute(
-                        f"""
-                        UPDATE episodes
-                        SET file_save_location = '{key_directory}'
-                        WHERE id = {episode["id"]}
-                        """
-                    )
-                    curs.commit()
-                    print(key_directory)
-                    time.sleep(15)
+    return
 
 
 with DAG(
     dag_id="podcast_scrape",
     default_args=default_args,
-    schedule_interval="@hourly",
+    schedule_interval="0 */3 * * *",
     catchup=False
 ) as dag:
+    # Get list of podcast from 'podcasts' table that need to be checked for updates.
     get_podcast_list_from_db = PythonOperator(
         task_id="get_podcast_list_from_db",
         python_callable=get_podcast_list_from_db,
         provide_context=True
     )
+    # Check each podcast feed for updates.
+    # If there are udpates, parse the feed for new episode metadata and save data in S3.
     get_new_episodes_and_save_to_s3 = PythonOperator(
         task_id="get_new_episodes_and_save_to_s3",
         python_callable=get_new_episodes_and_save_to_s3,
         provide_context=True
     )
+    # Get the S3 metadata and add it to the 'episodes' table.
+    # This metadata will contain links to the audio files.
     add_new_episodes_to_db = PythonOperator(
         task_id="add_new_episodes_to_db",
         python_callable=add_new_episodes_to_db,
         provide_context=True
     )
+    # Check 'episodes' table for any episodes that do not have a matching file in S3.
+    # The 'episodes' table contains a column with a link to the source audio file and
+    #     a destination column where a directory is stored once the audio file has been retrieved.
+    #     If destination column is empty, that means the audio file hasn't been saved.
     download_episodes_to_s3 = PythonOperator(
         task_id="download_episodes_to_s3",
         python_callable=download_episodes_to_s3
     )
-
     get_podcast_list_from_db >> get_new_episodes_and_save_to_s3 >> add_new_episodes_to_db >> download_episodes_to_s3
