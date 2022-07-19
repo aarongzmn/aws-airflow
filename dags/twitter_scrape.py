@@ -246,7 +246,7 @@ def scrape_tweets_for_query(**context):
 with DAG(
     dag_id="twitter_scrape",
     default_args=default_args,
-    schedule_interval="@daily",
+    schedule_interval="@hourly",
     catchup=False,
 ) as dag:
     get_query_tasks_from_database = PythonOperator(
