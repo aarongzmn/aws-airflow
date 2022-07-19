@@ -201,7 +201,10 @@ def get_query_tasks_from_database(**context) -> [dict]:
 
 # TASK 2
 def scrape_tweets_for_query(**context):
-
+    """Get scrape results for each day for each query.
+    The scraping job is offloaded to a Lambda function that returns a list of scrape results.
+    Lastly, the scrape results are INSERTED INTO the database 'tweets' and 'users' tables.
+    """
     query_tasks = context["ti"].xcom_pull(task_ids="get_query_tasks_from_database", key="query_tasks")
     for query in query_tasks:
         date_list = query["to_scrape"]
