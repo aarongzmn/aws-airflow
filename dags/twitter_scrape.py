@@ -7,8 +7,9 @@ from datetime import datetime, timedelta, timezone
 from dateutil import parser
 # import copy
 import json
-
+import time
 import requests
+from requests.exceptions import HTTPError
 import pandas as pd
 import psycopg2
 from psycopg2.extras import RealDictCursor, execute_values
@@ -226,8 +227,17 @@ def scrape_tweets_for_query(**context):
                     query_string = query_template.replace("$STARTDATE", start_date_str).replace("$ENDDATE", end_date_str)
                     print(f"Getting tweets for query: {query_string}")
                     data = {"query": query_string}
-                    # the lambda endpoing would be converted to an environment variable in production
-                    r = requests.post("https://66s4jhi0ma.execute-api.us-west-2.amazonaws.com/api/query", json=data)
+                    try:
+                        # the lambda endpoing would be converted to an environment variable in production
+                        r = requests.post("https://66s4jhi0ma.execute-api.us-west-2.amazonaws.com/api/query", json=data)
+                        time.sleep(5)
+                        r.raise_for_status()
+                        break
+                    except HTTPError as e:
+                        print(f"Request failed while working on date {start_date_str} for query: {query_string}")
+                        print(e.text)
+                        raise
+
                     query_response = r.json()
                     print(f"Response contains {len(query_response)} tweets for query: {query_string}")
                     print(f"First item in response list is: {query_response[0]}")
