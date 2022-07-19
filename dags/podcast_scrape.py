@@ -64,6 +64,8 @@ def get_podcast_list_from_db(**context) -> [list]:
 
 # TASK 2 Helper Function
 def get_feed_data_for_new_episodes(podcast_data):
+    """Get updated metadata for each episode in each podcast feed and save the metadata to an S3 bucket.
+    """
     feed_url = podcast_data["feed_url"]
     last_updated = podcast_data["last_updated"]
     if last_updated is None:
@@ -99,6 +101,8 @@ def get_feed_data_for_new_episodes(podcast_data):
 # TASK 2 Helper Function
 def regex_expisode_cast(pattern: str, string: str) -> list:
     """Use regular expression to search for pattern in text.
+    This is used to extract host/cohost/guest names from the show notes.
+    Note: This likely won't work for new podcats that are added.
     Args:
         pattern (str): Regex pattern
         string (str): String that will be checked against pattern
@@ -194,7 +198,9 @@ def get_key_attributes_from_feed_data(podcast_feed_data, podcast_id, get_cast=Tr
     return key_episode_data
 
 # TASK 2
-def get_new_episodes_and_save_to_s3(**context):
+def get_new_episodes_and_save_to_s3(**context) -> [dict]:
+    """Get the metadata from S3 for each podcast and use that to update the 'episodes' database table.
+    """
     podcast_list = context["ti"].xcom_pull(task_ids="get_podcast_list_from_db", key="podcast_list")
 
     for podcast in range(len(podcast_list)):
@@ -230,7 +236,10 @@ def get_new_episodes_and_save_to_s3(**context):
     context["ti"].xcom_push(key="podcast_feed_updates", value=podcast_list)
 
 
-def batch_insert_into_database(table_name: str, episodes: list) -> list:
+def batch_insert_into_database(table_name: str, episodes: [dict]) -> list:
+    """Takes a list of dictionary items and adds the items (in bulk) to the given database table.
+    The dictionary keys must match the column names in the datbase table.
+    """
     col_names = ", ".join(episodes[0].keys())
     insert_values = [tuple(e.values()) for e in episodes]
     with PostgresHook(postgres_conn_id="aws_podcastdb").get_conn() as conn:
@@ -242,6 +251,8 @@ def batch_insert_into_database(table_name: str, episodes: list) -> list:
 
 # TASK 3
 def add_new_episodes_to_db(**context):
+    """Get podcast feed metadata from S3 directory and add it to the 'episodes' database table.
+    """
     podcast_list = context["ti"].xcom_pull(task_ids="get_new_episodes_and_save_to_s3", key="podcast_feed_updates")
     for podcast in range(len(podcast_list)):
         key_directory = podcast_list[podcast]["processed_directory"]
@@ -255,6 +266,9 @@ def add_new_episodes_to_db(**context):
 
 # TASK 4
 def download_episodes_to_s3():
+    """Get list of episodes that have not been downloaded from the database.
+    Download the episodes and update the database with the download location in S3.
+    """
     s3_hook = S3Hook(aws_conn_id='aws_default')
     with PostgresHook(postgres_conn_id="aws_podcastdb").get_conn() as conn:
         with conn.cursor(cursor_factory=RealDictCursor) as curs:

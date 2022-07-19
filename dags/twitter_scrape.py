@@ -101,7 +101,7 @@ class ParseTweet():
         users_list["snapshot_date"] = users_list.pop("snapshot_date")
         return users_list
 
-    def split_tweet_data_and_user_data(self):
+    def split_tweet_data_and_user_data(self) -> (dict, dict):
         tweet_dict = self.rename_keys_for_tweet_data()
         users_list = []
         user_id = tweet_dict.pop("user_id")
@@ -136,8 +136,8 @@ class ParseTweet():
         return tweet_dict, users_list
 
 
-# Helper funtion to SELECT from database
-def select_from_database(sql) -> list:
+# HELPER FUNCTION
+def select_from_database(sql) -> [dict]:
     """SELECT database and return results in dictionary format.
     """
     conn = PostgresHook(postgres_conn_id="aws_twitterdb").get_conn()
@@ -147,7 +147,7 @@ def select_from_database(sql) -> list:
         result_list = [dict(row) for row in query_result]
     return result_list
 
-
+# HELPER FUNCTION
 def batch_insert_into_database(table_name: str, record_list: [dict]) -> list:
     """BULK INSERT INTO database (1000 rows at a time). Input list shoud be items in dictionary format.
     """
@@ -161,7 +161,12 @@ def batch_insert_into_database(table_name: str, record_list: [dict]) -> list:
 
 
 # TASK 1
-def get_query_tasks_from_database(**context):
+def get_query_tasks_from_database(**context) -> [dict]:
+    """
+    1. Use the query start and end date range to creat a list of days for queries that need to be updated.
+    2. Query the database to make a list of the days already have scrape data in the database.
+    Compare lists 1 and 2 to figure out which remaining days need scrape data.
+    """
     sql = "SELECT * FROM queries WHERE active is true"
     query_tasks = select_from_database(sql)
     for i in range(len(query_tasks)):
@@ -194,8 +199,9 @@ def get_query_tasks_from_database(**context):
         query_tasks[i]["scrape_to_date"] = scrape_to.strftime("%Y-%m-%d")
     context["ti"].xcom_push(key="query_tasks", value=query_tasks)
 
-
+# TASK 2
 def scrape_tweets_for_query(**context):
+
     query_tasks = context["ti"].xcom_pull(task_ids="get_query_tasks_from_database", key="query_tasks")
     for query in query_tasks:
         date_list = query["to_scrape"]
