@@ -156,9 +156,9 @@ def batch_insert_into_database(table_name: str, record_list: [dict]) -> list:
     insert_values = [tuple(e.values()) for e in record_list]
     with PostgresHook(postgres_conn_id="aws_twitterdb").get_conn() as conn:
         with conn.cursor() as curs:
-            sql = f"INSERT INTO {table_name} ({col_names}) VALUES %s ON DUPLICATE KEY UPDATE id=id"
+            sql = f"""INSERT INTO {table_name} ({col_names}) VALUES %s ON CONFLICT (id) DO NOTHING"""
             insert_result = psycopg2.extras.execute_values(curs, sql, insert_values, page_size=1000)
-    return
+    return insert_result
 
 
 # TASK 1
@@ -247,8 +247,10 @@ def scrape_tweets_for_query(**context):
                         tweets_table_updates.append(tweets_dict)
                         users_table_updates.extend(users_dict)
 
-                    batch_insert_into_database("tweets", tweets_table_updates)
-                    batch_insert_into_database("users", users_table_updates)
+                    insert_result = batch_insert_into_database("tweets", tweets_table_updates)
+                    print(f"Insert result for 'tweets' table was: {len(insert_result)}")
+                    insert_result = batch_insert_into_database("users", users_table_updates)
+                    print(f"Insert result for 'tweets' table was: {len(insert_result)}")
     return
 
 with DAG(
