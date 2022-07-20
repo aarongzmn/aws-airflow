@@ -219,7 +219,7 @@ def scrape_tweets_for_query(**context):
                 start_date_str = start_date_dt.strftime('%Y-%m-%d')
                 end_date_dt = (start_date_dt + timedelta(days=1)).date()
                 end_date_str = end_date_dt.strftime('%Y-%m-%d')
-                if end_date_dt >= datetime.utcnow().date():
+                if end_date_dt == datetime.utcnow().date():
                     # Only scrape if all of results are from the previous day
                     continue
                 else:
