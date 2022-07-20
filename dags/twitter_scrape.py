@@ -276,17 +276,17 @@ with DAG(
     schedule_interval="0 */3 * * *",
     catchup=False,
 ) as dag:
-    get_query_tasks_from_database = PythonOperator(
-        task_id="get_query_tasks_from_database",
-        python_callable=get_query_tasks_from_database,
-        provide_context=True,
-    )
+    # get_query_tasks_from_database = PythonOperator(
+    #     task_id="get_query_tasks_from_database",
+    #     python_callable=get_query_tasks_from_database,
+    #     provide_context=True,
+    # )
     
-    scrape_tweets_for_query = PythonOperator(
-        task_id="scrape_tweets_for_query",
-        python_callable=scrape_tweets_for_query,
-        provide_context=True,
-    )
+    # scrape_tweets_for_query = PythonOperator(
+    #     task_id="scrape_tweets_for_query",
+    #     python_callable=scrape_tweets_for_query,
+    #     provide_context=True,
+    # )
 
     read_from_s3_test = PythonOperator(
         task_id="read_from_s3_test",
@@ -294,4 +294,6 @@ with DAG(
         provide_context=True,
     )
 
-    get_query_tasks_from_database >> scrape_tweets_for_query >> read_from_s3_test
+    # get_query_tasks_from_database >> scrape_tweets_for_query
+
+    read_from_s3_test
