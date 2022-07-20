@@ -227,7 +227,7 @@ def scrape_tweets_for_query(**context):
                     data = {"query": query_string}
                     try:
                         # the lambda endpoing would be converted to an environment variable in production
-                        r = requests.post("https://66s4jhi0ma.execute-api.us-west-2.amazonaws.com/api/query", json=data)
+                        r = requests.post("https://nzq2m6h2wfkhmzvvjtj4ce35ve0pnixf.lambda-url.us-west-2.on.aws/", json=data)
                         time.sleep(5)
                         r.raise_for_status()
                         
