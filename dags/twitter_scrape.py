@@ -212,7 +212,7 @@ def scrape_tweets_for_query(**context):
         if len(date_list) == 0:
             print("No updates found at this time.")
         else:
-            print(f"Scraping {len(date_list)} days worth of updates: {date_list}")
+            print(f"Scraping {len(date_list)} days worth of updates for query ID: {query['id']}: {date_list}")
             query_template = query["query_string"]
             for query_date in date_list:
                 try:
@@ -220,9 +220,9 @@ def scrape_tweets_for_query(**context):
                     start_date_str = start_date_dt.strftime('%Y-%m-%d')
                     end_date_dt = (start_date_dt + timedelta(days=1)).date()
                     end_date_str = end_date_dt.strftime('%Y-%m-%d')
-                    if end_date_dt == datetime.utcnow().date():
+                    if end_date_dt >= datetime.utcnow().date():
                         # Only scrape if all of results are from the previous day
-                        continue
+                        pass
                     else:
                         print(start_date_dt, end_date_str)
                         query_string = query_template.replace("$STARTDATE", start_date_str).replace("$ENDDATE", end_date_str)
