@@ -233,10 +233,11 @@ def scrape_tweets_for_query(**context):
                             r = requests.post("https://66s4jhi0ma.execute-api.us-west-2.amazonaws.com/api/query", json=data)
                             time.sleep(5)
                             r.raise_for_status()
-                            break
+                            
                         except HTTPError as e:
                             print(f"Request failed while working on date {start_date_str} for query: {query_string}")
                             print(e.text)
+                            print(r.json())
                             raise
 
                         query_response = r.json()
