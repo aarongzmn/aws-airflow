@@ -264,7 +264,7 @@ def read_from_s3_test():
 
     s3_hook = S3Hook(aws_conn_id='aws_default')
     response = s3_hook.read_key(key_directory, bucket_name)
-    episode_list = json.loads(response)#.decode("utf-8")
+    episode_list = json.loads(response).decode("utf-8")
     dict_obj = json.loads(episode_list)
     print(dict_obj[0])
     return
