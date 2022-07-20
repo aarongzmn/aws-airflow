@@ -215,50 +215,42 @@ def scrape_tweets_for_query(**context):
             print(f"Scraping {len(date_list)} days worth of updates for query ID: {query['id']}: {date_list}")
             query_template = query["query_string"]
             for query_date in date_list:
-                try:
-                    start_date_dt = datetime.strptime(query_date, "%Y-%m-%d")
-                    start_date_str = start_date_dt.strftime('%Y-%m-%d')
-                    end_date_dt = (start_date_dt + timedelta(days=1)).date()
-                    end_date_str = end_date_dt.strftime('%Y-%m-%d')
-                    if end_date_dt >= datetime.utcnow().date():
-                        # Only scrape if all of results are from the previous day
-                        pass
-                    else:
-                        print(start_date_dt, end_date_str)
-                        query_string = query_template.replace("$STARTDATE", start_date_str).replace("$ENDDATE", end_date_str)
-                        print(f"Getting tweets for query: {query_string}")
-                        data = {"query": query_string}
-                        try:
-                            # the lambda endpoing would be converted to an environment variable in production
-                            r = requests.post("https://66s4jhi0ma.execute-api.us-west-2.amazonaws.com/api/query", json=data)
-                            time.sleep(5)
-                            r.raise_for_status()
-                            
-                        except HTTPError as e:
-                            print(f"Request failed while working on date {start_date_str} for query: {query_string}")
-                            print(e.text)
-                            print(r.json())
-                            raise
+                start_date_dt = datetime.strptime(query_date, "%Y-%m-%d")
+                start_date_str = start_date_dt.strftime('%Y-%m-%d')
+                end_date_dt = (start_date_dt + timedelta(days=1)).date()
+                end_date_str = end_date_dt.strftime('%Y-%m-%d')
+                if end_date_dt >= datetime.utcnow().date():
+                    # Only scrape if all of results are from the previous day
+                    pass
+                else:
+                    query_string = query_template.replace("$STARTDATE", start_date_str).replace("$ENDDATE", end_date_str)
+                    data = {"query": query_string}
+                    try:
+                        # the lambda endpoing would be converted to an environment variable in production
+                        r = requests.post("https://66s4jhi0ma.execute-api.us-west-2.amazonaws.com/api/query", json=data)
+                        time.sleep(5)
+                        r.raise_for_status()
+                        
+                    except HTTPError as e:
+                        print(f"Request failed with status code {e.response.status_code} while working on date {start_date_str} for query: {query_string}")
+                        time.sleep(15)
+                        continue
 
-                        query_response = r.json()
-                        print(f"Response contains {len(query_response)} tweets for query: {query_string}")
-                        print(f"First item in response list is: {query_response[0]}")
+                    query_response = r.json()
+                    print(f"Response for {query_string} on {start_date_str} contains {len(query_response)} tweets for query: {query_string}")
 
-                        tweets_table_updates = []
-                        users_table_updates = []
-                        query_id = query["id"]
-                        for tweet in query_response:
-                            tweets_dict, users_dict = ParseTweet(tweet, query_id).split_tweet_data_and_user_data()
-                            tweets_table_updates.append(tweets_dict)
-                            users_table_updates.extend(users_dict)
+                    tweets_table_updates = []
+                    users_table_updates = []
+                    query_id = query["id"]
+                    for tweet in query_response:
+                        tweets_dict, users_dict = ParseTweet(tweet, query_id).split_tweet_data_and_user_data()
+                        tweets_table_updates.append(tweets_dict)
+                        users_table_updates.extend(users_dict)
 
-                        insert_result = batch_insert_into_database("tweets", tweets_table_updates)
-                        print(f"Added {len(insert_result)} new tweets for query: {query_string}")
-                        insert_result = batch_insert_into_database("users", users_table_updates)
-                        print(f"Added {len(insert_result)} new users for query: {query_string}")
-                except:
-                    print(f"Query failed while working on date {start_date_str} for query: {query_string}. Moving onto next query.")
-                    time.sleep(30)
+                    insert_result = batch_insert_into_database("tweets", tweets_table_updates)
+                    print(f"Added {len(insert_result)} new tweets for query: {query_string}")
+                    insert_result = batch_insert_into_database("users", users_table_updates)
+                    print(f"Added {len(insert_result)} new users for query: {query_string}")
     return
 
 with DAG(
