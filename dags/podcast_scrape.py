@@ -21,7 +21,7 @@ default_args = {
     "owner": "Aaron Guzman",
     "depend_on_past": False,
     "start_date": datetime(2020, 1, 1),
-    "retries": 1,
+    "retries": 0,
     "retry_delay": timedelta(seconds=30),
 }
 
