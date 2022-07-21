@@ -19,12 +19,12 @@
 ### Twitter Scraper
 1. Get list of queries from database.
     - New queries can be added to the **queries** table. This can be done directly through SQL, or a webapp (or Google Sheets, etc) could be created to make the process simpler.
-2. Get scrape results for each query.
-    - The data is normalized and split into two lists: "tweets" and "users" which are added to the **tweets** and **users** database tables.
+2. Get scrape results for each query and load files to S3.
     - Prior to starting the scrape, the database is checked to calculate which days have already been processed.
     - The scrape jobs are divided by day (i.e. A scrape with a 10 day date range will be split into 10 'jobs'.). This will make it easier to update the DAG and incorporate parallel processing in the future.
-    - **Scraping jobs are handed off** to a [Lambda function I setup](https://github.com/aarongzmn/tweet-scraper).
-
+    - **Scraping jobs are handed off** to a [Lambda function I setup](https://github.com/aarongzmn/tweet-scraper). The Lambda function scrapes the data and saves the data to a folder in S3.
+3. Get files from S3 and load into database.
+    - The data is normalized and split into two lists: "tweets" and "users" which are inserted into the **tweets** and **users** database tables.
 #### Resources Used
 - Computing: Amazon MWAA, Lambda
 - Database: AWS Aurora Serverles (Postgres)
