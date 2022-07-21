@@ -1,5 +1,5 @@
 from airflow import DAG
-# from airflow.providers.amazon.aws.hooks.s3 import S3Hook
+from airflow.providers.amazon.aws.hooks.s3 import S3Hook
 from airflow.providers.postgres.hooks.postgres import PostgresHook
 from airflow.operators.python_operator import PythonOperator
 
@@ -205,12 +205,13 @@ def get_query_tasks_from_database(**context) -> [dict]:
     context["ti"].xcom_push(key="query_tasks", value=query_tasks)
 
 # TASK 2
-def scrape_tweets_for_query(**context):
+def get_twitter_data_and_save_to_s3(**context):
     """Get scrape results for each day for each query.
     The scraping job is offloaded to a Lambda function that returns a list of scrape results.
     Lastly, the scrape results are INSERTED INTO the database 'tweets' and 'users' tables.
     """
     query_tasks = context["ti"].xcom_pull(task_ids="get_query_tasks_from_database", key="query_tasks")
+    s3_file_list = []
     for query in query_tasks:
         date_list = query["to_scrape"]
         if len(date_list) == 0:
@@ -227,39 +228,60 @@ def scrape_tweets_for_query(**context):
                     # Only scrape if all of results are from the previous day
                     pass
                 else:
-                    query_string = query_template.replace("$STARTDATE", start_date_str).replace("$ENDDATE", end_date_str)
-                    data = {"query": query_string}
                     try:
-                        # the lambda endpoing would be converted to an environment variable in production
-                        r = requests.post("https://hkvmlsqp3ydvi7sxw6fx57bydq0krtpm.lambda-url.us-west-2.on.aws/", json=data)
-                        time.sleep(5)
+                        query_id = query["id"]
+                        query_string = query_template.replace("$STARTDATE", start_date_str).replace("$ENDDATE", end_date_str)
+                        bucket_name = "twitter-scrape-results"  # convert to environment variable
+                        key_name = f"query_id_{query_id}_starting_{start_date_str}_ending{end_date_str}.json"
+                        data = {
+                            "query_string": query_string,
+                            "bucket_name": bucket_name,
+                            "key_name": key_name
+                        }
+                        # convert lambda URL to environment variable
+                        r = requests.post("https://nzq2m6h2wfkhmzvvjtj4ce35ve0pnixf.lambda-url.us-west-2.on.aws/", json=data)
                         r.raise_for_status()
-                        
+                        print(r.text)
+                        data["query_id"] = query_id
+                        s3_file_list.append(data)
+
                     except HTTPError as e:
                         print(f"Request failed with status code {e.response.status_code} while working on date {start_date_str} for query: {query_string}")
                         time.sleep(15)
                         continue
+    context["ti"].xcom_push(key="s3_file_list", value=s3_file_list)
 
-                    query_response = r.json()
-                    print(f"Response for {query_string} on {start_date_str} contains {len(query_response)} tweets for query: {query_string}")
+# TASK 3
+def load_s3_twitter_data_into_database(**context) -> None:
+    """Get each S3 file in xcom list and insert it into the database.
+    TODO: It may be a good idea to combine the S3 files so the database INSERT INTO is more efficient.
+    """
+    s3_file_list = context["ti"].xcom_pull(task_ids="get_twitter_data_and_save_to_s3", key="s3_file_list")
+    s3_hook = S3Hook(aws_conn_id='aws_default')
+    for s3_file in s3_file_list:
+        query_string = s3_file["query_string"]
+        key_name = s3_file["key_name"]
+        bucket_name = s3_file["bucket_name"]
+        query_id = s3_file["query_id"]
+        response_str = s3_hook.read_key(key_name, bucket_name)
+        response_dict = json.loads(response_str)
 
-                    tweets_table_updates = []
-                    users_table_updates = []
-                    query_id = query["id"]
-                    for tweet in query_response:
-                        tweets_dict, users_dict = ParseTweet(tweet, query_id).split_tweet_data_and_user_data()
-                        tweets_table_updates.append(tweets_dict)
-                        users_table_updates.extend(users_dict)
+        tweets_table_updates = []
+        users_table_updates = []
+        for tweet in response_dict:
+            tweets_dict, users_dict = ParseTweet(tweet, query_id).split_tweet_data_and_user_data()
+            tweets_table_updates.append(tweets_dict)
+            users_table_updates.extend(users_dict)
 
-                    batch_insert_into_database("tweets", tweets_table_updates)
-                    batch_insert_into_database("users", users_table_updates)
-    return
+        batch_insert_into_database("tweets", tweets_table_updates)
+        batch_insert_into_database("users", users_table_updates)
+        print(f"Finished inserting new records for query: {query_string}")
 
 
 with DAG(
     dag_id="twitter_scrape",
     default_args=default_args,
-    schedule_interval="0 */3 * * *",
+    schedule_interval="@daily",
     catchup=False,
 ) as dag:
     get_query_tasks_from_database = PythonOperator(
@@ -268,10 +290,16 @@ with DAG(
         provide_context=True,
     )
     
-    scrape_tweets_for_query = PythonOperator(
-        task_id="scrape_tweets_for_query",
-        python_callable=scrape_tweets_for_query,
+    get_twitter_data_and_save_to_s3 = PythonOperator(
+        task_id="get_twitter_data_and_save_to_s3",
+        python_callable=get_twitter_data_and_save_to_s3,
         provide_context=True,
     )
 
-    get_query_tasks_from_database >> scrape_tweets_for_query
+    load_s3_twitter_data_into_database = PythonOperator(
+        task_id="load_s3_twitter_data_into_database",
+        python_callable=load_s3_twitter_data_into_database,
+        provide_context=True,
+    )
+    
+    get_query_tasks_from_database >> get_twitter_data_and_save_to_s3 >> load_s3_twitter_data_into_database
