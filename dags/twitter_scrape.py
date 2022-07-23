@@ -176,21 +176,19 @@ def get_query_tasks_from_database(**context) -> [dict]:
     query_tasks = select_from_database(sql)
     print(f"Active queries found: {len(query_tasks)}")
     sql = """
-    SELECT query_id, CAST(tweet_date AS DATE)
-    FROM (
-        SELECT *, ROW_NUMBER() OVER (PARTITION BY CAST(tweet_date AS DATE) ORDER BY tweet_date DESC) AS sn
-        FROM tweets
-    ) A WHERE sn = 1;
+    SELECT query_id, CAST(tweet_date as DATE), COUNT(*)
+    FROM tweets
+    GROUP BY query_id, CAST(tweet_date as DATE)
+    ORDER BY tweet_date ASC
     """
     days_scraped = select_from_database(sql)
 
     max_scrape_date = datetime.now(timezone.utc) - timedelta(days=2)  # limit scrape to data > 1 day old
     for i in range(len(query_tasks)):
-        active_query = query_tasks[i]
-        db_scrape_data = [q["tweet_date"].strftime("%Y-%m-%d") for q in days_scraped if q["query_id"] == active_query["id"]]
+        db_scrape_data = [q["tweet_date"].strftime("%Y-%m-%d") for q in days_scraped if q["query_id"] == query_tasks[i]["id"]]
 
-        scrape_from = active_query["scrape_from_date"]
-        scrape_to = min(active_query["scrape_to_date"], max_scrape_date)
+        scrape_from = query_tasks[i]["scrape_from_date"]
+        scrape_to = min(query_tasks[i]["scrape_to_date"], max_scrape_date)
         date_range_dt = pd.date_range(start=scrape_from, end=scrape_to)
         date_range_str = list(date_range_dt.strftime("%Y-%m-%d"))
 
