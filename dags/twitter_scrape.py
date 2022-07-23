@@ -214,9 +214,9 @@ def get_twitter_data_and_save_to_s3(**context):
             print(f"Scrape for query ID {query_id} is up to date. Moving onto next query in list.")
         else:
             print(f"Scraping {len(date_list)} days worth of updates for query ID: {query_id}: {date_list}")
-            for query_date in date_list:
-                end_date_dt = (query_date + timedelta(days=1)).date()
-                start_date = query_date.strftime('%Y-%m-%d')
+            for start_date in date_list:
+                start_date_dt = datetime.strptime(start_date, '%Y-%m-%d')
+                end_date_dt = (start_date_dt + timedelta(days=1)).date()
                 end_date = end_date_dt.strftime('%Y-%m-%d')
                 try:
                     query_string = query["query_string"].replace("$STARTDATE", start_date).replace("$ENDDATE", end_date)
