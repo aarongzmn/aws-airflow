@@ -130,3 +130,4 @@ dmypy.json
 .env*
 *.ipynb
 envars.py
+requirements/synergy_1.14.5-stable.a975f61a_windows_x64.msi

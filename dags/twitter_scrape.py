@@ -19,7 +19,7 @@ psycopg2.extensions.register_adapter(dict, psycopg2.extras.Json)
 default_args = {
     "owner": "Aaron Guzman",
     "depend_on_past": False,
-    "start_date": datetime(2020, 1, 1),
+    "start_date": datetime(2022, 1, 1),
     "retries": 0,
     "retry_delay": timedelta(seconds=30),
 }
@@ -168,41 +168,36 @@ def batch_insert_into_database(table_name: str, record_list: [dict]) -> list:
 # TASK 1
 def get_query_tasks_from_database(**context) -> [dict]:
     """
-    1. Use the query start and end date range to creat a list of days for queries that need to be updated.
-    2. Query the database to make a list of the days already have scrape data in the database.
-    Compare lists 1 and 2 to figure out which remaining days need scrape data.
+    1. Get list of active queries and start/end dates for each query.
+    2. Get list of days that have scrape data in database table for each query.
+    3. Compare lists 1 and 2 to figure out which remaining days need scrape data.
     """
     sql = "SELECT * FROM queries WHERE active is true"
     query_tasks = select_from_database(sql)
+    print(f"Active queries found: {len(query_tasks)}")
+    sql = """
+    SELECT query_id, CAST(tweet_date AS DATE)
+    FROM (
+        SELECT *, ROW_NUMBER() OVER (PARTITION BY CAST(tweet_date AS DATE) ORDER BY tweet_date DESC) AS sn
+        FROM tweets
+    ) A WHERE sn = 1;
+    """
+    days_scraped = select_from_database(sql)
+
+    max_scrape_date = datetime.now(timezone.utc) - timedelta(days=2)  # limit scrape to data > 1 day old
     for i in range(len(query_tasks)):
-        query_tasks[i]["to_scrape"] = []
-        # Create a list of days that have at least 1 tweet entry in the tweets table
-        sql = f"""
-            SELECT TWEETS.*
-            FROM TWEETS
-            JOIN
-                (SELECT MIN(T2.TWEET_DATE) AS MIN_TIMESTAMP
-                    FROM TWEETS T2
-                    GROUP BY DATE(T2.TWEET_DATE)) T2 ON TWEETS.TWEET_DATE = T2.MIN_TIMESTAMP
-            AND TWEETS.QUERY_ID = {query_tasks[i]["id"]}
-            """
-        response = select_from_database(sql)
-        scrape_processed_days = [i["tweet_date"].strftime("%Y-%m-%d") for i in response]
+        active_query = query_tasks[i]
+        db_scrape_data = [q["tweet_date"].strftime("%Y-%m-%d") for q in days_scraped if q["query_id"] == active_query["id"]]
 
-        scrape_from = query_tasks[i]["scrape_from_date"]
-        scrape_to = query_tasks[i]["scrape_to_date"]
-        if scrape_to > datetime.now(timezone.utc):
-            scrape_to = datetime.now(timezone.utc)
-        date_list = pd.date_range(start=scrape_from, end=scrape_to)
-        date_list = [i.strftime("%Y-%m-%d") for i in date_list]
+        scrape_from = active_query["scrape_from_date"]
+        scrape_to = min(active_query["scrape_to_date"], max_scrape_date)
+        date_range_dt = pd.date_range(start=scrape_from, end=scrape_to)
+        date_range_str = list(date_range_dt.strftime("%Y-%m-%d"))
 
-        for date in date_list:
-            if date not in scrape_processed_days:
-                query_tasks[i]["to_scrape"].append(date)
-
-        query_tasks[i]["scrape_from_date"] = scrape_from.strftime("%Y-%m-%d")
-        query_tasks[i]["scrape_to_date"] = scrape_to.strftime("%Y-%m-%d")
-    context["ti"].xcom_push(key="query_tasks", value=query_tasks)
+        query_tasks[i]["to_scrape"] = [date for date in date_range_str if date not in db_scrape_data]
+        del query_tasks[i]["scrape_from_date"]
+        del query_tasks[i]["scrape_to_date"]
+    context["ti"].xcom_push(key="database_query_tasks", value=query_tasks)
 
 # TASK 2
 def get_twitter_data_and_save_to_s3(**context):
@@ -210,45 +205,39 @@ def get_twitter_data_and_save_to_s3(**context):
     The scraping job is offloaded to a Lambda function that returns a list of scrape results.
     Lastly, the scrape results are INSERTED INTO the database 'tweets' and 'users' tables.
     """
-    query_tasks = context["ti"].xcom_pull(task_ids="get_query_tasks_from_database", key="query_tasks")
+    query_tasks = context["ti"].xcom_pull(task_ids="get_query_tasks_from_database", key="database_query_tasks")
     s3_file_list = []
     for query in query_tasks:
+        query_id = query["id"]
         date_list = query["to_scrape"]
         if len(date_list) == 0:
-            print("No updates found at this time.")
+            print(f"Scrape for query ID {query_id} is up to date. Moving onto next query in list.")
         else:
-            print(f"Scraping {len(date_list)} days worth of updates for query ID: {query['id']}: {date_list}")
-            query_template = query["query_string"]
+            print(f"Scraping {len(date_list)} days worth of updates for query ID: {query_id}: {date_list}")
             for query_date in date_list:
-                start_date_dt = datetime.strptime(query_date, "%Y-%m-%d")
-                start_date_str = start_date_dt.strftime('%Y-%m-%d')
-                end_date_dt = (start_date_dt + timedelta(days=1)).date()
-                end_date_str = end_date_dt.strftime('%Y-%m-%d')
-                if end_date_dt >= datetime.utcnow().date():
-                    # Only scrape if all of results are from the previous day
-                    pass
-                else:
-                    try:
-                        query_id = query["id"]
-                        query_string = query_template.replace("$STARTDATE", start_date_str).replace("$ENDDATE", end_date_str)
-                        bucket_name = "twitter-scrape-results"  # convert to environment variable
-                        key_name = f"query_id_{query_id}_starting_{start_date_str}_ending{end_date_str}.json"
-                        data = {
-                            "query_string": query_string,
-                            "bucket_name": bucket_name,
-                            "key_name": key_name
-                        }
-                        # convert lambda URL to environment variable
-                        r = requests.post("https://nzq2m6h2wfkhmzvvjtj4ce35ve0pnixf.lambda-url.us-west-2.on.aws/", json=data)
-                        r.raise_for_status()
-                        print(r.text)
-                        data["query_id"] = query_id
-                        s3_file_list.append(data)
+                end_date_dt = (query_date + timedelta(days=1)).date()
+                start_date = query_date.strftime('%Y-%m-%d')
+                end_date = end_date_dt.strftime('%Y-%m-%d')
+                try:
+                    query_string = query["query_string"].replace("$STARTDATE", start_date).replace("$ENDDATE", end_date)
+                    bucket_name = "twitter-scrape-results"  # convert to environment variable
+                    key_name = f"query_id_{query_id}_starting_{start_date}_ending{end_date}.json"
+                    data = {
+                        "query_string": query_string,
+                        "bucket_name": bucket_name,
+                        "key_name": key_name
+                    }
+                    # convert lambda URL to environment variable
+                    r = requests.post("https://nzq2m6h2wfkhmzvvjtj4ce35ve0pnixf.lambda-url.us-west-2.on.aws/", json=data)
+                    r.raise_for_status()
+                    print(r.text)
+                    data["query_id"] = query_id
+                    s3_file_list.append(data)
 
-                    except HTTPError as e:
-                        print(f"Request failed with status code {e.response.status_code} while working on date {start_date_str} for query: {query_string}")
-                        time.sleep(15)
-                        continue
+                except HTTPError as e:
+                    print(f"Request failed with status code {e.response.status_code} while working on date {start_date} for query: {query_string}")
+                    time.sleep(15)
+                    continue
     context["ti"].xcom_push(key="s3_file_list", value=s3_file_list)
 
 # TASK 3
@@ -258,6 +247,7 @@ def load_s3_twitter_data_into_database(**context) -> None:
     """
     s3_file_list = context["ti"].xcom_pull(task_ids="get_twitter_data_and_save_to_s3", key="s3_file_list")
     s3_hook = S3Hook(aws_conn_id='aws_default')
+    print(f"Loading {len(s3_file_list)} S3 file(s) into database.")
     for s3_file in s3_file_list:
         query_string = s3_file["query_string"]
         key_name = s3_file["key_name"]
