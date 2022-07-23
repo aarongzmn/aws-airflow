@@ -315,7 +315,7 @@ def download_episodes_to_s3():
 with DAG(
     dag_id="podcast_scrape",
     default_args=default_args,
-    schedule_interval="0 */3 * * *",
+    schedule_interval="@daily",
     catchup=False
 ) as dag:
     # Get list of podcast from 'podcasts' table that need to be checked for updates.
