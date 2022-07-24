@@ -107,7 +107,7 @@ class ParseTweet():
         users_list = []
         user_id = tweet_dict.pop("user_id")
         if user_id:
-            user_id["user_type"] = "owner"
+            user_id["user_type"] = "author"
             users_list.append(user_id)
             tweet_dict["user_id"] = user_id["id"]
         else:
