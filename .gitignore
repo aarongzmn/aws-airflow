@@ -128,6 +128,11 @@ dmypy.json
 # Pyre type checker
 .pyre/
 .env*
-*.ipynb
 envars.py
 requirements/synergy_1.14.5-stable.a975f61a_windows_x64.msi
+bucket_files.xlsx
+CREATE tweets.sql
+requirements/query_id_100_starting_2022-01-01_ending2022-01-02.json
+query_id_100_starting_2022-01-01_ending2022-01-02.json
+CREATE users.sql
+~$bucket_files.xlsx
