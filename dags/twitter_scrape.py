@@ -30,9 +30,10 @@ class ParseTweet():
         - This will rename the dictionary keys so they are compatible with the database tables.
         - These lists will be used to update the 'tweets' and 'users' tablees.
     """
-    def __init__(self, tweet, query_id):
+    def __init__(self, tweet, query_id, snapshot_date):
         self.tweet_dict = tweet
         self.query_id = query_id
+        self.snapshot_date = snapshot_date
 
     def rename_keys_for_tweet_data(self):
         """Rename keys to match 'twitterdb' 'tweets' table
@@ -65,16 +66,11 @@ class ParseTweet():
         self.tweet_dict["hashtags"] = self.tweet_dict.pop('hashtags', None)
         self.tweet_dict["cashtags"] = self.tweet_dict.pop('cashtags', None)
         self.tweet_dict["query_id"] = self.query_id
-
-        # The Snowflake ID will be a unique ID that can be used to quickly tie the 'users' table to a specific tweet.
-        # Because the 'users' table may have duplicates, this will help narrow down the specific entry with accurate information.
-        timestamp = int(round(parser.parse(self.tweet_dict["tweet_date"]).timestamp()))
-        self.tweet_dict["snowflake_id"] = str(self.tweet_dict["id"]) + str(timestamp)
-        self.tweet_dict["query_id"] = self.query_id
         return self.tweet_dict
 
     def rename_keys_for_user_data(self, users_list):
         """Rename keys to match 'twitterdb' 'users' table
+        These data for these keys are all sourced from snscrape library scrape data.
         """
         users_list["username"] = users_list.pop("username")
         users_list["id"] = users_list.pop("id")
@@ -98,13 +94,13 @@ class ParseTweet():
         users_list["profile_banner_url"] = users_list.pop("profileBannerUrl")
         users_list["label"] = users_list.pop("label")
         users_list["user_type"] = users_list.pop("user_type")
-        users_list["snowflake_id"] = users_list.pop("snowflake_id")
         users_list["snapshot_date"] = users_list.pop("snapshot_date")
         return users_list
 
     def split_tweet_data_and_user_data(self) -> (dict, dict):
         tweet_dict = self.rename_keys_for_tweet_data()
         users_list = []
+
         user_id = tweet_dict.pop("user_id")
         if user_id:
             user_id["user_type"] = "author"
@@ -131,8 +127,9 @@ class ParseTweet():
             tweet_dict["mentioned_users"] = None
         # Add these keys/values to all items in 'users_list'
         for user in users_list:
-            user["snowflake_id"] = tweet_dict["snowflake_id"]
-            user["snapshot_date"] = tweet_dict["tweet_date"]
+            user["tweet_id"] = tweet_dict["id"]
+            user["query_id"] = self.query_id
+            user["snapshot_date"] = self.snapshot_date
             self.rename_keys_for_user_data(user)
         return tweet_dict, users_list
 
@@ -230,6 +227,7 @@ def get_twitter_data_and_save_to_s3(**context):
                     r.raise_for_status()
                     print(r.text)
                     data["query_id"] = query_id
+                    data["snapshot_date"] = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S%z")
                     s3_file_list.append(data)
 
                 except HTTPError as e:
@@ -251,13 +249,14 @@ def load_s3_twitter_data_into_database(**context) -> None:
         key_name = s3_file["key_name"]
         bucket_name = s3_file["bucket_name"]
         query_id = s3_file["query_id"]
+        snapshot_date = s3_file["snapshot_date"]
         response_str = s3_hook.read_key(key_name, bucket_name)
         response_dict = json.loads(response_str)
 
         tweets_table_updates = []
         users_table_updates = []
         for tweet in response_dict:
-            tweets_dict, users_dict = ParseTweet(tweet, query_id).split_tweet_data_and_user_data()
+            tweets_dict, users_dict = ParseTweet(tweet, query_id, snapshot_date).split_tweet_data_and_user_data()
             tweets_table_updates.append(tweets_dict)
             users_table_updates.extend(users_dict)
 
