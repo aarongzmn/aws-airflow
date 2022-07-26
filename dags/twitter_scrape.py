@@ -149,15 +149,11 @@ def select_from_database(sql) -> [dict]:
 def batch_insert_into_database(table_name: str, record_list: [dict]) -> list:
     """BULK INSERT INTO database (1000 rows at a time). Input list shoud be items in dictionary format.
     """
-    if table_name == "tweets":
-        on_conflict = "ON CONFLICT (id) DO NOTHING"
-    else:
-        on_conflict = ""
     col_names = ", ".join(record_list[0].keys())
     insert_values = [tuple(e.values()) for e in record_list]
     with PostgresHook(postgres_conn_id="aws_twitterdb").get_conn() as conn:
         with conn.cursor() as curs:
-            sql = f"""INSERT INTO {table_name} ({col_names}) VALUES %s {on_conflict}"""
+            sql = f"INSERT INTO {table_name} ({col_names}) VALUES %s"
             psycopg2.extras.execute_values(curs, sql, insert_values, page_size=1000)
     return
 
