@@ -119,10 +119,13 @@ class ParseTweet():
 
         mentioned_list = tweet_dict.pop("mentioned_users")
         if mentioned_list:
-            tweet_dict["mentioned_users"] = [i["id"] for i in mentioned_list]
-            for mentioned in mentioned_list:
-                mentioned["user_type"] = "mentioned"
-                users_list.append(mentioned)
+            # for loop to remove duplicates for mentioned list
+            mentioned_user_ids = []
+            for m in mentioned_list:
+                if m["id"] not in mentioned_user_ids:
+                    users_list.append(m)
+                    mentioned_user_ids.append(m["id"])
+            tweet_dict["mentioned_users"] = mentioned_user_ids
         else:
             tweet_dict["mentioned_users"] = None
         # Add these keys/values to all items in 'users_list'
