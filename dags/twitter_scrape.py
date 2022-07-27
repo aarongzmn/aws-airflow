@@ -259,8 +259,8 @@ def load_s3_twitter_data_into_database(**context) -> None:
             tweets_table_updates.append(tweets_dict)
             users_table_updates.extend(users_dict)
 
-        batch_insert_into_database("tweets", tweets_table_updates)
-        batch_insert_into_database("users", users_table_updates)
+        batch_insert_into_database("tweets2", tweets_table_updates)
+        batch_insert_into_database("users2", users_table_updates)
         print(f"Finished inserting new records for query: {query_string}")
 
 

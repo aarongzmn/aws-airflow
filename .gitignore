@@ -136,3 +136,5 @@ requirements/query_id_100_starting_2022-01-01_ending2022-01-02.json
 query_id_100_starting_2022-01-01_ending2022-01-02.json
 CREATE users.sql
 ~$bucket_files.xlsx
+README.ipynb
+users_updates.csv
